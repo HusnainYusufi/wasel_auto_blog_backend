@@ -1,0 +1,202 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Blog {
+  id     String @id @default(cuid())
+  status String @default("queued") // queued | running | completed | failed
+
+  // Request configuration
+  topic        String
+  keywords     String  @default("[]") // JSON string[]
+  language     String  @default("English")
+  tone         String  @default("professional")
+  audience     String  @default("general readers")
+  lengthPreset String  @default("standard")
+  pointOfView  String  @default("second-person")
+  brandName    String?
+  callToAction String?
+  imageCount   Int     @default(3)
+  aspectRatio  String  @default("16:9")
+  imageStyle   String  @default("modern editorial photography")
+  includeFaq   Boolean @default(true)
+  includeToc   Boolean @default(true)
+  textModel    String
+  imageModel   String
+
+  // Progress
+  progress    Int     @default(0)
+  currentStep String?
+  error       String?
+
+  // Generated output
+  title           String?
+  slug            String?
+  metaTitle       String?
+  metaDescription String?
+  excerpt         String?
+  outline         String? // JSON
+  seo             String? // JSON
+  contentMarkdown String?
+  contentHtml     String?
+  wordCount       Int     @default(0)
+  readingMinutes  Int     @default(0)
+  heroImageUrl    String?
+
+  useKnowledgeBase   Boolean @default(false)
+  knowledgeSourceIds String  @default("[]") // JSON string[] of KnowledgeSource ids used
+
+  // Editorial review
+  reviewStatus String    @default("pending") // pending | approved | rejected
+  reviewNote   String?
+  reviewedAt   DateTime?
+  reviewedById String?
+  reviewedBy   User?     @relation("BlogReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+
+  createdById String?
+
+  startedAt   DateTime?
+  completedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  images    BlogImage[]
+  events    GenerationEvent[]
+  auditLogs BlogAuditLog[]
+
+  @@index([createdAt])
+  @@index([reviewStatus])
+}
+
+model BlogImage {
+  id           String  @id @default(cuid())
+  blogId       String
+  blog         Blog    @relation(fields: [blogId], references: [id], onDelete: Cascade)
+  role         String  @default("section") // hero | section
+  sectionIndex Int?
+  placeholder  String? // token used inside the markdown body
+  prompt       String
+  alt          String  @default("")
+  caption      String  @default("")
+  url          String
+  aspectRatio  String  @default("16:9")
+  createdAt    DateTime @default(now())
+
+  @@index([blogId])
+}
+
+model GenerationEvent {
+  id        String   @id @default(cuid())
+  blogId    String
+  blog      Blog     @relation(fields: [blogId], references: [id], onDelete: Cascade)
+  step      String
+  status    String   @default("running") // running | done | failed
+  message   String   @default("")
+  progress  Int      @default(0)
+  createdAt DateTime @default(now())
+
+  @@index([blogId])
+}
+
+model KnowledgeSource {
+  id     String @id @default(cuid())
+  url    String @unique
+  status String @default("pending") // pending | ready | failed
+
+  title       String?
+  siteName    String?
+  description String?
+  headings    String  @default("[]") // JSON string[]
+  content     String? // extracted plain text
+  wordCount   Int     @default(0)
+  error       String?
+
+  discoveredFrom String? // set when found by crawling a listing page
+
+  fetchedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([status])
+}
+
+/// Single derived profile of the whole knowledge base (id is always "default").
+model KnowledgeProfile {
+  id                String   @id @default("default")
+  niche             String?
+  audience          String?
+  toneSummary       String?
+  styleNotes        String   @default("[]") // JSON string[]
+  recurringThemes   String   @default("[]") // JSON string[]
+  coveredTopics     String   @default("[]") // JSON string[]
+  contentGaps       String   @default("[]") // JSON string[]
+  suggestedTopics   String   @default("[]") // JSON {title, angle, keywords[]}[]
+  sourceCount       Int      @default(0)
+  stale             Boolean  @default(true)
+  generatedAt       DateTime?
+  updatedAt         DateTime @updatedAt
+}
+
+model User {
+  id           String  @id @default(cuid())
+  email        String  @unique
+  passwordHash String
+  name         String
+  role         String  @default("editor") // superadmin | admin | editor
+  isActive     Boolean @default(true)
+
+  /// Forces existing tokens to be rejected after a password change or lockout.
+  tokenVersion Int @default(0)
+
+  lastLoginAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  refreshTokens RefreshToken[]
+  reviews       Blog[]         @relation("BlogReviewer")
+  auditLogs     BlogAuditLog[]
+
+  @@index([email])
+}
+
+/// One row per issued refresh token. Rotation replaces the row and links the
+/// replacement, so a replayed token exposes the whole family as compromised.
+model RefreshToken {
+  id        String @id @default(cuid())
+  userId    String
+  user      User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  /// SHA-256 of the token — the raw value is never stored.
+  tokenHash String @unique
+  family    String
+
+  revokedAt   DateTime?
+  replacedBy  String?
+  userAgent   String?
+  ip          String?
+  expiresAt   DateTime
+  createdAt   DateTime @default(now())
+
+  @@index([userId])
+  @@index([family])
+}
+
+model BlogAuditLog {
+  id     String @id @default(cuid())
+  blogId String
+  blog   Blog   @relation(fields: [blogId], references: [id], onDelete: Cascade)
+
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  action    String // created | completed | failed | approved | rejected | reopened | edited
+  note      String @default("")
+  createdAt DateTime @default(now())
+
+  @@index([blogId])
+  @@index([createdAt])
+}
