@@ -4,13 +4,18 @@ import { ChatMessage, ChatOptions } from '../minimax/minimax.types';
 import { extractJson } from '../common/json.util';
 import { postJson } from '../common/http.util';
 import { TextProvider } from '../providers/text-provider.interface';
+import {
+  GEMINI_IMAGE_MODELS,
+  GeneratedImage,
+  ImageProvider,
+} from '../providers/image-provider.interface';
 import { GEMINI_TEXT_MODELS, GeminiPart, GeminiResponse } from './gemini.types';
 
 const PLACEHOLDER_KEY = 'your_gemini_api_key_here';
 const RETRYABLE_HTTP = new Set([408, 429, 500, 502, 503, 504]);
 
 @Injectable()
-export class GeminiService implements TextProvider {
+export class GeminiService implements TextProvider, ImageProvider {
   private readonly logger = new Logger(GeminiService.name);
 
   readonly id = 'gemini' as const;
@@ -33,6 +38,68 @@ export class GeminiService implements TextProvider {
 
   get defaultModel(): string {
     return this.config.get<string>('GEMINI_TEXT_MODEL') ?? 'gemini-flash-latest';
+  }
+
+  get defaultImageModel(): string {
+    return (
+      this.config.get<string>('GEMINI_IMAGE_MODEL') ?? 'gemini-3.1-flash-image'
+    );
+  }
+
+  /**
+   * Text-to-image. Unlike MiniMax, Gemini returns the image inline as base64
+   * rather than a URL, so the bytes are handed back directly — nothing to
+   * download and nothing that expires.
+   */
+  async generateImage(params: {
+    prompt: string;
+    aspectRatio?: string;
+    model?: string;
+  }): Promise<GeneratedImage> {
+    const model = (GEMINI_IMAGE_MODELS as readonly string[]).includes(
+      params.model ?? '',
+    )
+      ? (params.model as string)
+      : this.defaultImageModel;
+
+    const body: Record<string, unknown> = {
+      contents: [{ role: 'user', parts: [{ text: params.prompt.slice(0, 4000) }] }],
+      generationConfig: {
+        ...(params.aspectRatio
+          ? { imageConfig: { aspectRatio: params.aspectRatio } }
+          : {}),
+      },
+    };
+
+    const response = await this.request(
+      `/models/${encodeURIComponent(model)}:generateContent`,
+      body,
+    );
+
+    const blockReason = response.promptFeedback?.blockReason;
+    if (blockReason) {
+      throw new ServiceUnavailableException(
+        `Gemini refused the image prompt (${blockReason}).`,
+      );
+    }
+
+    const candidate = response.candidates?.[0];
+
+    for (const part of candidate?.content?.parts ?? []) {
+      const inline = part.inlineData ?? part.inline_data;
+      if (inline?.data) {
+        return {
+          buffer: Buffer.from(inline.data, 'base64'),
+          contentType: inline.mimeType ?? inline.mime_type ?? 'image/jpeg',
+        };
+      }
+    }
+
+    // A text-only reply usually means the model declined the prompt.
+    const explanation = extractText(candidate?.content?.parts).slice(0, 200);
+    throw new ServiceUnavailableException(
+      `Gemini returned no image${candidate?.finishReason ? ` (${candidate.finishReason})` : ''}${explanation ? `: ${explanation}` : ''}`,
+    );
   }
 
   private get apiKey(): string {

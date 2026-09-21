@@ -28,6 +28,43 @@ export class StorageService {
   }
 
   /**
+   * Persists a generated image, whichever form the provider returned it in:
+   * a URL to download (MiniMax) or raw bytes (Gemini's inline base64).
+   */
+  async saveGeneratedImage(
+    image: { url?: string; buffer?: Buffer; contentType?: string },
+    blogId: string,
+  ): Promise<string> {
+    if (image.buffer?.length) {
+      return this.saveBuffer(image.buffer, image.contentType, blogId);
+    }
+    if (image.url) {
+      return this.saveRemoteImage(image.url, blogId);
+    }
+    throw new Error('Provider returned neither image bytes nor a URL');
+  }
+
+  private async saveBuffer(
+    buffer: Buffer,
+    contentType: string | undefined,
+    blogId: string,
+  ): Promise<string> {
+    const normalized = (contentType ?? 'image/jpeg')
+      .split(';')[0]
+      .trim()
+      .toLowerCase();
+    const extension = MIME_EXTENSIONS[normalized] ?? 'jpg';
+
+    const dir = join(this.root, blogId);
+    await fs.mkdir(dir, { recursive: true });
+
+    const filename = `${randomUUID()}.${extension}`;
+    await fs.writeFile(join(dir, filename), buffer);
+
+    return `${this.publicUrl}/uploads/${blogId}/${filename}`;
+  }
+
+  /**
    * MiniMax image URLs expire after 24 hours, so every generated asset is copied
    * into local storage and re-served from this API.
    */

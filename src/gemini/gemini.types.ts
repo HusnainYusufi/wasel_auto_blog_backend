@@ -1,5 +1,15 @@
+export interface GeminiInlineData {
+  data?: string;
+  mimeType?: string;
+  /** snake_case variant some responses use. */
+  mime_type?: string;
+}
+
 export interface GeminiPart {
   text?: string;
+  /** Base64 image payload returned by the *-image models. */
+  inlineData?: GeminiInlineData;
+  inline_data?: GeminiInlineData;
   /** Reasoning trace marker returned by the 2.5+ models; not prose. */
   thoughtSignature?: string;
   thought?: boolean;

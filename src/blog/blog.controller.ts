@@ -16,6 +16,7 @@ import { GenerateBlogDto, IMAGE_STYLES, POINTS_OF_VIEW, TONES } from './dto/gene
 import { LENGTH_PRESETS } from './blog.prompts';
 import { ASPECT_RATIOS } from '../minimax/minimax.types';
 import { TextProviderRegistry } from '../providers/text-provider.registry';
+import { ImageProviderRegistry } from '../providers/image-provider.registry';
 import { ProgressEvent } from './blog.events';
 import { PIPELINE_STEPS } from './blog.events';
 import { Public } from '../auth/decorators/public.decorator';
@@ -28,13 +29,28 @@ export class BlogController {
   constructor(
     private readonly blogService: BlogService,
     private readonly textProviders: TextProviderRegistry,
+    private readonly imageProviders: ImageProviderRegistry,
   ) {}
 
   /** Everything the generator form needs to render itself. */
   @Get('options')
   options() {
-    // No provider configured at all is a setup problem, not a request error.
-    const defaultProvider = this.textProviders.available()[0] ?? null;
+    // Must honour TEXT_PROVIDER, not just list order — defaultProvider() does
+    // that and falls back when the preferred engine has no key.
+    let defaultProvider: { id: string; defaultModel: string } | null = null;
+    try {
+      defaultProvider = this.textProviders.defaultProvider();
+    } catch {
+      // Nothing configured at all is a setup problem, not a request error.
+      defaultProvider = null;
+    }
+
+    let defaultImageProvider: { id: string; defaultImageModel: string } | null = null;
+    try {
+      defaultImageProvider = this.imageProviders.defaultProvider();
+    } catch {
+      defaultImageProvider = null;
+    }
 
     return {
       tones: TONES,
@@ -53,10 +69,17 @@ export class BlogController {
         ...value,
       })),
       steps: PIPELINE_STEPS,
+      imageProviders: this.imageProviders.list().map((p) => ({
+        id: p.id,
+        label: p.label,
+        configured: p.isConfigured,
+        defaultModel: p.isConfigured ? p.defaultImageModel : null,
+      })),
       defaults: {
         textProvider: defaultProvider?.id ?? null,
         textModel: defaultProvider?.defaultModel ?? null,
-        imageModel: process.env.MINIMAX_IMAGE_MODEL ?? 'image-01',
+        imageProvider: defaultImageProvider?.id ?? null,
+        imageModel: defaultImageProvider?.defaultImageModel ?? null,
       },
     };
   }

@@ -9,6 +9,7 @@ import { concatMap, map } from 'rxjs/operators';
 import { PrismaService } from '../prisma/prisma.service';
 import { MinimaxService } from '../minimax/minimax.service';
 import { TextProviderRegistry } from '../providers/text-provider.registry';
+import { ImageProviderRegistry } from '../providers/image-provider.registry';
 import { StorageService } from '../storage/storage.service';
 import { KnowledgeService } from '../knowledge/knowledge.service';
 import { KeywordSetsService } from '../keyword-sets/keyword-sets.service';
@@ -48,6 +49,7 @@ export class BlogService {
     private readonly prisma: PrismaService,
     private readonly minimax: MinimaxService,
     private readonly textProviders: TextProviderRegistry,
+    private readonly imageProviders: ImageProviderRegistry,
     private readonly storage: StorageService,
     private readonly knowledge: KnowledgeService,
     private readonly keywordSets: KeywordSetsService,
@@ -175,6 +177,13 @@ export class BlogService {
       model: dto.textModel,
     });
 
+    // Resolved up front too, so an unusable image engine fails fast when images
+    // were actually requested rather than silently yielding an article with none.
+    const imageProvider =
+      dto.imageCount > 0
+        ? this.imageProviders.resolve(dto.imageProvider)
+        : this.imageProviders.list()[0];
+
     // Keywords typed directly take precedence over the ones a set contributes.
     const setIds = dto.keywordSetIds ?? [];
     const fromSets = await this.keywordSets.resolveKeywords(setIds);
@@ -198,7 +207,8 @@ export class BlogService {
         includeToc: dto.includeToc,
         textProvider: resolved.provider.id,
         textModel: resolved.model,
-        imageModel: this.minimax.defaultImageModel,
+        imageProvider: imageProvider.id,
+        imageModel: imageProvider.defaultImageModel,
         status: 'queued',
         title: dto.topic,
         knowledgeSourceIds: JSON.stringify(
@@ -252,6 +262,8 @@ export class BlogService {
         });
       }
     }
+
+    const images = this.imageProviders.resolve(blog.imageProvider);
 
     const { provider: text, model } = this.textProviders.resolve({
       provider: blog.textProvider,
@@ -355,12 +367,12 @@ export class BlogService {
           const results = await Promise.all(
             batch.map(async (plan) => {
               try {
-                const [remoteUrl] = await this.minimax.generateImages({
+                const generated = await images.generateImage({
                   prompt: imagePrompt(plan.prompt, req.imageStyle),
                   aspectRatio: blog.aspectRatio,
-                  n: 1,
+                  model: blog.imageModel,
                 });
-                const url = await this.storage.saveRemoteImage(remoteUrl, blogId);
+                const url = await this.storage.saveGeneratedImage(generated, blogId);
                 return { plan, url, error: null as string | null };
               } catch (err) {
                 return { plan, url: null, error: (err as Error).message };
@@ -652,6 +664,7 @@ export class BlogService {
         includeToc: blog.includeToc,
         textProvider: blog.textProvider,
         textModel: blog.textModel,
+        imageProvider: blog.imageProvider,
         imageModel: blog.imageModel,
         useKnowledgeBase: blog.useKnowledgeBase,
         knowledgeSourceIds: safeParse<string[]>(blog.knowledgeSourceIds, []),
@@ -682,12 +695,13 @@ export class BlogService {
     });
     if (!image) throw new NotFoundException('Image not found');
 
-    const [remoteUrl] = await this.minimax.generateImages({
+    const provider = this.imageProviders.resolve(image.blog.imageProvider);
+    const generated = await provider.generateImage({
       prompt: imagePrompt(image.prompt, image.blog.imageStyle),
       aspectRatio: image.aspectRatio,
-      n: 1,
+      model: image.blog.imageModel,
     });
-    const url = await this.storage.saveRemoteImage(remoteUrl, blogId);
+    const url = await this.storage.saveGeneratedImage(generated, blogId);
 
     const updated = await this.prisma.blogImage.update({
       where: { id: imageId },

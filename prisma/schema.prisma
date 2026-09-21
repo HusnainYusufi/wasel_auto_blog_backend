@@ -27,8 +27,9 @@ model Blog {
   includeFaq   Boolean @default(true)
   includeToc   Boolean @default(true)
   textProvider String  @default("minimax") // minimax | gemini
-  textModel    String
-  imageModel   String
+  textModel     String
+  imageProvider String @default("minimax") // minimax | gemini
+  imageModel    String
 
   // Progress
   progress    Int     @default(0)

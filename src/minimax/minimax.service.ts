@@ -9,6 +9,10 @@ import {
 } from './minimax.types';
 import { extractJson } from '../common/json.util';
 import { TextProvider } from '../providers/text-provider.interface';
+import {
+  GeneratedImage,
+  ImageProvider,
+} from '../providers/image-provider.interface';
 import { postJson } from '../common/http.util';
 
 const PLACEHOLDER_KEY = 'your_minimax_api_key_here';
@@ -17,7 +21,7 @@ const RETRYABLE_HTTP = new Set([408, 429, 500, 502, 503, 504]);
 const RETRYABLE_BASE_RESP = new Set([1002, 1027, 1039, 1042, 2013, 2049]);
 
 @Injectable()
-export class MinimaxService implements TextProvider {
+export class MinimaxService implements TextProvider, ImageProvider {
   private readonly logger = new Logger(MinimaxService.name);
 
   readonly id = 'minimax' as const;
@@ -132,6 +136,21 @@ export class MinimaxService implements TextProvider {
     throw new ServiceUnavailableException(
       'MiniMax did not return parseable JSON after a retry.',
     );
+  }
+
+  /** Single image, normalised for the shared ImageProvider contract. */
+  async generateImage(params: {
+    prompt: string;
+    aspectRatio?: string;
+    model?: string;
+  }): Promise<GeneratedImage> {
+    const [url] = await this.generateImages({
+      prompt: params.prompt,
+      aspectRatio: params.aspectRatio,
+      model: params.model,
+      n: 1,
+    });
+    return { url };
   }
 
   /** Text-to-image. Returns temporary URLs that expire after 24h — persist them. */

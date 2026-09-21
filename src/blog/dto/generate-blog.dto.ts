@@ -14,6 +14,7 @@ import { Transform } from 'class-transformer';
 import { ASPECT_RATIOS } from '../../minimax/minimax.types';
 import { ALL_TEXT_MODELS } from '../text-models';
 import { TEXT_PROVIDER_IDS } from '../../providers/text-provider.interface';
+import { IMAGE_PROVIDER_IDS } from '../../providers/image-provider.interface';
 import { LENGTH_PRESETS } from '../blog.prompts';
 
 export const TONES = [
@@ -140,6 +141,11 @@ export class GenerateBlogDto {
   @IsOptional()
   @IsIn(ALL_TEXT_MODELS)
   textModel?: string;
+
+  /** Which engine renders the imagery. Omit to use the configured default. */
+  @IsOptional()
+  @IsIn(IMAGE_PROVIDER_IDS)
+  imageProvider?: string;
 
   /** Steer the article with previously published work. */
   @IsOptional()

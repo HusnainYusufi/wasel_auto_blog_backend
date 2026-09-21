@@ -59,10 +59,11 @@ substring occurrence, which is script-agnostic.
 
 ## Text providers
 
-Text generation runs through a provider abstraction, so an article can be written by
-**MiniMax** or **Google Gemini**. The engine is selectable per generation in the studio's
-advanced controls, and the choice is stored on the article. Imagery is always MiniMax
-`image-01` — Gemini's image models are a separate API and are not wired up.
+Both text **and** imagery run through provider abstractions, so an article can be written
+and illustrated by **MiniMax** or **Google Gemini**. Each choice is stored on the article.
+
+`TEXT_PROVIDER` and `IMAGE_PROVIDER` set the defaults; either can be overridden per
+request with `textProvider` / `imageProvider`.
 
 | | MiniMax | Gemini |
 |---|---|---|
@@ -71,6 +72,9 @@ advanced controls, and the choice is stored on the article. Imagery is always Mi
 | System prompt | a `system` message | dedicated `systemInstruction` field |
 | JSON output | prompted, with a corrective retry | native `responseMimeType: application/json` |
 | Key | `MINIMAX_API_KEY` | `GEMINI_API_KEY` |
+| Image model | `image-01` | `gemini-3.1-flash-image` |
+| Image result | short-lived URL (expires 24h) | base64 `inlineData` |
+| Aspect ratio | `aspect_ratio` field | `generationConfig.imageConfig.aspectRatio` |
 
 `TEXT_PROVIDER` sets the default when a request does not name one. A provider with no key
 is advertised as unconfigured and refuses requests up front, before a row is written.
@@ -80,8 +84,17 @@ regeneration. Sending a model that belongs to another provider corrects the prov
 than silently swapping in the wrong model.
 
 Adding a third provider means implementing [`TextProvider`](src/providers/text-provider.interface.ts)
-and registering it in [`TextProviderRegistry`](src/providers/text-provider.registry.ts) —
-the pipeline itself needs no changes.
+and/or [`ImageProvider`](src/providers/image-provider.interface.ts) and registering it in
+the matching registry — the pipeline itself needs no changes.
+
+One trap worth knowing: a provider class can implement both contracts, so the image
+contract deliberately names its default `defaultImageModel` rather than `defaultModel`. An
+earlier shared name silently resolved to the *text* model whenever the image registry
+asked for a default.
+
+[`StorageService.saveGeneratedImage`](src/storage/storage.service.ts) absorbs the shape
+difference: it downloads a URL or writes inline bytes, and every asset ends up served
+locally from `/uploads` either way.
 
 ### Gemini notes
 
@@ -187,7 +200,9 @@ If `minimaxConfigured` is `false`, the key is missing or still the placeholder.
 | `GEMINI_API_KEY` | — | Optional. From https://aistudio.google.com/apikey |
 | `GEMINI_BASE_URL` | `https://generativelanguage.googleapis.com/v1beta` | Gemini API base. |
 | `GEMINI_TEXT_MODEL` | `gemini-flash-latest` | Default Gemini model. |
-| `TEXT_PROVIDER` | `minimax` | Default engine: `minimax` or `gemini`. |
+| `TEXT_PROVIDER` | `minimax` | Default text engine: `minimax` or `gemini`. |
+| `IMAGE_PROVIDER` | `minimax` | Default image engine: `minimax` or `gemini`. |
+| `GEMINI_IMAGE_MODEL` | `gemini-3.1-flash-image` | Gemini image model. |
 | `PORT` | `3332` | API port. |
 | `CORS_ORIGIN` | `http://localhost:3211` | Comma-separated allowed origins. |
 | `PUBLIC_URL` | `http://localhost:3332` | Base URL used to build stored image links. |
@@ -246,6 +261,7 @@ Only `topic` is required.
   "includeToc": true,
   "textProvider": "gemini",       // minimax | gemini — omit for the configured default
   "textModel": "gemini-flash-latest",
+  "imageProvider": "gemini",      // minimax | gemini — omit for the configured default
   "useKnowledgeBase": true,      // write in the voice of your crawled posts
   "knowledgeSourceIds": []       // empty = every ready source
 }
