@@ -26,6 +26,7 @@ model Blog {
   imageStyle   String  @default("modern editorial photography")
   includeFaq   Boolean @default(true)
   includeToc   Boolean @default(true)
+  textProvider String  @default("minimax") // minimax | gemini
   textModel    String
   imageModel   String
 

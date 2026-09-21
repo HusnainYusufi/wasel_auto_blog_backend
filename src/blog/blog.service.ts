@@ -8,6 +8,7 @@ import { Observable, Subject, concat, from } from 'rxjs';
 import { concatMap, map } from 'rxjs/operators';
 import { PrismaService } from '../prisma/prisma.service';
 import { MinimaxService } from '../minimax/minimax.service';
+import { TextProviderRegistry } from '../providers/text-provider.registry';
 import { StorageService } from '../storage/storage.service';
 import { KnowledgeService } from '../knowledge/knowledge.service';
 import { GenerateBlogDto } from './dto/generate-blog.dto';
@@ -45,6 +46,7 @@ export class BlogService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly minimax: MinimaxService,
+    private readonly textProviders: TextProviderRegistry,
     private readonly storage: StorageService,
     private readonly knowledge: KnowledgeService,
   ) {}
@@ -145,6 +147,12 @@ export class BlogService {
   // ---------------------------------------------------------------- creation
 
   async create(dto: GenerateBlogDto, userId?: string) {
+    // Fail fast on an unconfigured provider, before a row is written.
+    const resolved = this.textProviders.resolve({
+      provider: dto.textProvider,
+      model: dto.textModel,
+    });
+
     const blog = await this.prisma.blog.create({
       data: {
         topic: dto.topic,
@@ -161,7 +169,8 @@ export class BlogService {
         imageStyle: dto.imageStyle,
         includeFaq: dto.includeFaq,
         includeToc: dto.includeToc,
-        textModel: dto.textModel ?? this.minimax.defaultTextModel,
+        textProvider: resolved.provider.id,
+        textModel: resolved.model,
         imageModel: this.minimax.defaultImageModel,
         status: 'queued',
         title: dto.topic,
@@ -216,7 +225,10 @@ export class BlogService {
       }
     }
 
-    const model = blog.textModel;
+    const { provider: text, model } = this.textProviders.resolve({
+      provider: blog.textProvider,
+      model: blog.textModel,
+    });
 
     try {
       await this.prisma.blog.update({
@@ -227,7 +239,7 @@ export class BlogService {
       // 1. Blueprint -------------------------------------------------------
       await this.emit(blogId, 'blueprint', 'running', 'Researching angles and shaping the outline…', 6);
       const blueprint = normalizeBlueprint(
-        await this.minimax.chatJson<Blueprint>(blueprintPrompt(req), {
+        await text.chatJson<Blueprint>(blueprintPrompt(req), {
           model,
           temperature: 0.7,
           maxTokens: 8192,
@@ -260,7 +272,7 @@ export class BlogService {
 
       const preset = LENGTH_PRESETS[req.lengthPreset] ?? LENGTH_PRESETS.standard;
       let markdown = cleanMarkdown(
-        await this.minimax.chat(articlePrompt(req, blueprint, planned), {
+        await text.chat(articlePrompt(req, blueprint, planned), {
           model,
           temperature: 0.85,
           maxTokens: Math.min(32000, Math.round(preset.words * 6) + 3000),
@@ -273,7 +285,7 @@ export class BlogService {
       if (req.knowledge?.existingArticles.length) {
         await this.emit(blogId, 'writing', 'running', 'Linking to your existing posts…', 50);
         try {
-          const { links } = await this.minimax.chatJson<{ links: InterlinkSuggestion[] }>(
+          const { links } = await text.chatJson<{ links: InterlinkSuggestion[] }>(
             interlinkPrompt(markdown, req.knowledge.existingArticles),
             { model, temperature: 0.3, maxTokens: 2000 },
           );
@@ -376,7 +388,7 @@ export class BlogService {
       await this.emit(blogId, 'seo', 'running', 'Scoring on-page SEO and writing social copy…', 86);
       let seoPack: SeoPack | null = null;
       try {
-        seoPack = await this.minimax.chatJson<SeoPack>(
+        seoPack = await text.chatJson<SeoPack>(
           seoPackPrompt(req, blueprint, markdown),
           { model, temperature: 0.5, maxTokens: 4096 },
         );
@@ -610,6 +622,7 @@ export class BlogService {
         imageStyle: blog.imageStyle,
         includeFaq: blog.includeFaq,
         includeToc: blog.includeToc,
+        textProvider: blog.textProvider,
         textModel: blog.textModel,
         imageModel: blog.imageModel,
         useKnowledgeBase: blog.useKnowledgeBase,
@@ -749,6 +762,7 @@ export class BlogService {
       heroImageUrl: blog.heroImageUrl ?? blog.images?.[0]?.url ?? null,
       language: blog.language,
       tone: blog.tone,
+      textProvider: blog.textProvider,
       textModel: blog.textModel,
       createdAt: blog.createdAt,
       completedAt: blog.completedAt,

@@ -6,6 +6,8 @@ import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { join } from 'path';
 import { PrismaModule } from './prisma/prisma.module';
 import { MinimaxModule } from './minimax/minimax.module';
+import { GeminiModule } from './gemini/gemini.module';
+import { ProvidersModule } from './providers/providers.module';
 import { BlogModule } from './blog/blog.module';
 import { KnowledgeModule } from './knowledge/knowledge.module';
 import { AuthModule } from './auth/auth.module';
@@ -26,6 +28,8 @@ import { HealthController } from './common/health.controller';
     PrismaModule,
     AuthModule,
     MinimaxModule,
+    GeminiModule,
+    ProvidersModule,
     KnowledgeModule,
     BlogModule,
   ],

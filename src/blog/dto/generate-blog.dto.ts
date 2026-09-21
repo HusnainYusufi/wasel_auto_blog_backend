@@ -11,7 +11,9 @@ import {
   MaxLength,
 } from 'class-validator';
 import { Transform } from 'class-transformer';
-import { ASPECT_RATIOS, TEXT_MODELS } from '../../minimax/minimax.types';
+import { ASPECT_RATIOS } from '../../minimax/minimax.types';
+import { ALL_TEXT_MODELS } from '../text-models';
+import { TEXT_PROVIDER_IDS } from '../../providers/text-provider.interface';
 import { LENGTH_PRESETS } from '../blog.prompts';
 
 export const TONES = [
@@ -109,8 +111,13 @@ export class GenerateBlogDto {
   @IsBoolean()
   includeToc = true;
 
+  /** Which engine writes the article. Omit to use the configured default. */
   @IsOptional()
-  @IsIn(TEXT_MODELS)
+  @IsIn(TEXT_PROVIDER_IDS)
+  textProvider?: string;
+
+  @IsOptional()
+  @IsIn(ALL_TEXT_MODELS)
   textModel?: string;
 
   /** Steer the article with previously published work. */

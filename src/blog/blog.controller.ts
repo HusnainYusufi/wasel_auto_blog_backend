@@ -14,7 +14,8 @@ import { Observable } from 'rxjs';
 import { BlogService } from './blog.service';
 import { GenerateBlogDto, IMAGE_STYLES, POINTS_OF_VIEW, TONES } from './dto/generate-blog.dto';
 import { LENGTH_PRESETS } from './blog.prompts';
-import { ASPECT_RATIOS, TEXT_MODELS } from '../minimax/minimax.types';
+import { ASPECT_RATIOS } from '../minimax/minimax.types';
+import { TextProviderRegistry } from '../providers/text-provider.registry';
 import { ProgressEvent } from './blog.events';
 import { PIPELINE_STEPS } from './blog.events';
 import { Public } from '../auth/decorators/public.decorator';
@@ -24,24 +25,37 @@ import { ReviewDto } from './dto/review.dto';
 
 @Controller('blogs')
 export class BlogController {
-  constructor(private readonly blogService: BlogService) {}
+  constructor(
+    private readonly blogService: BlogService,
+    private readonly textProviders: TextProviderRegistry,
+  ) {}
 
   /** Everything the generator form needs to render itself. */
   @Get('options')
   options() {
+    // No provider configured at all is a setup problem, not a request error.
+    const defaultProvider = this.textProviders.available()[0] ?? null;
+
     return {
       tones: TONES,
       pointsOfView: POINTS_OF_VIEW,
       imageStyles: IMAGE_STYLES,
       aspectRatios: ASPECT_RATIOS,
-      textModels: TEXT_MODELS,
+      textProviders: this.textProviders.list().map((p) => ({
+        id: p.id,
+        label: p.label,
+        configured: p.isConfigured,
+        models: p.models,
+        defaultModel: p.isConfigured ? p.defaultModel : null,
+      })),
       lengthPresets: Object.entries(LENGTH_PRESETS).map(([key, value]) => ({
         key,
         ...value,
       })),
       steps: PIPELINE_STEPS,
       defaults: {
-        textModel: process.env.MINIMAX_TEXT_MODEL ?? 'MiniMax-M2.5',
+        textProvider: defaultProvider?.id ?? null,
+        textModel: defaultProvider?.defaultModel ?? null,
         imageModel: process.env.MINIMAX_IMAGE_MODEL ?? 'image-01',
       },
     };

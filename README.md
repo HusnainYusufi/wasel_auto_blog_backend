@@ -17,6 +17,41 @@ Each generation runs five stages and streams progress over SSE:
 
 A failed image never fails the article — its placeholder is simply dropped.
 
+## Text providers
+
+Text generation runs through a provider abstraction, so an article can be written by
+**MiniMax** or **Google Gemini**. The engine is selectable per generation in the studio's
+advanced controls, and the choice is stored on the article. Imagery is always MiniMax
+`image-01` — Gemini's image models are a separate API and are not wired up.
+
+| | MiniMax | Gemini |
+|---|---|---|
+| Endpoint | `/v1/chat/completions` (OpenAI-shaped) | `/v1beta/models/{model}:generateContent` |
+| Auth | `Authorization: Bearer` | `X-goog-api-key` header |
+| System prompt | a `system` message | dedicated `systemInstruction` field |
+| JSON output | prompted, with a corrective retry | native `responseMimeType: application/json` |
+| Key | `MINIMAX_API_KEY` | `GEMINI_API_KEY` |
+
+`TEXT_PROVIDER` sets the default when a request does not name one. A provider with no key
+is advertised as unconfigured and refuses requests up front, before a row is written.
+
+Model ids are unique across providers, so a stored `textModel` is enough to route a later
+regeneration. Sending a model that belongs to another provider corrects the provider rather
+than silently swapping in the wrong model.
+
+Adding a third provider means implementing [`TextProvider`](src/providers/text-provider.interface.ts)
+and registering it in [`TextProviderRegistry`](src/providers/text-provider.registry.ts) —
+the pipeline itself needs no changes.
+
+### Gemini notes
+
+- Reasoning arrives as extra `parts` carrying `thought` / `thoughtSignature`. Those are
+  stripped before assembly, so traces never reach the article or the JSON parser.
+- `finishReason: MAX_TOKENS` with no text means the budget went entirely to reasoning;
+  that surfaces as a clear error rather than an empty article.
+- A blocked prompt (`promptFeedback.blockReason`) and a `SAFETY` finish are reported
+  distinctly from transport failures.
+
 ## Authentication
 
 Every `/api` route requires a bearer token. The exceptions are `/health`, the SSE progress
@@ -109,6 +144,10 @@ If `minimaxConfigured` is `false`, the key is missing or still the placeholder.
 | `MINIMAX_BASE_URL` | `https://api.minimax.io/v1` | Use the region endpoint that matches your account. |
 | `MINIMAX_TEXT_MODEL` | `MiniMax-M2.5` | Any of M3 / M2.7 / M2.5 / M2.1 / M2 (± `-highspeed`). |
 | `MINIMAX_IMAGE_MODEL` | `image-01` | Image model. |
+| `GEMINI_API_KEY` | — | Optional. From https://aistudio.google.com/apikey |
+| `GEMINI_BASE_URL` | `https://generativelanguage.googleapis.com/v1beta` | Gemini API base. |
+| `GEMINI_TEXT_MODEL` | `gemini-flash-latest` | Default Gemini model. |
+| `TEXT_PROVIDER` | `minimax` | Default engine: `minimax` or `gemini`. |
 | `PORT` | `3332` | API port. |
 | `CORS_ORIGIN` | `http://localhost:3211` | Comma-separated allowed origins. |
 | `PUBLIC_URL` | `http://localhost:3332` | Base URL used to build stored image links. |
@@ -136,7 +175,7 @@ If `minimaxConfigured` is `false`, the key is missing or still the placeholder.
 | `POST` | `/api/knowledge/profile/rebuild` | Re-analyze the corpus. |
 | `POST` | `/api/knowledge/:id/recrawl` | Re-fetch one source. |
 | `DELETE` | `/api/knowledge/:id` / `/api/knowledge/all` | Remove one source, or all of them. |
-| `GET` | `/api/blogs/options` | Tones, lengths, image styles, aspect ratios, models — drives the frontend form. |
+| `GET` | `/api/blogs/options` | Tones, lengths, image styles, aspect ratios, and every text provider with its models and configured flag — drives the frontend form. |
 | `POST` | `/api/blogs` | Start a generation. Returns `{ id, status }` immediately. |
 | `GET` | `/api/blogs/:id/stream` | **SSE** progress. Replays history, then streams live events. |
 | `GET` | `/api/blogs` | List with `search`, `status`, `take`, `skip`. |
@@ -165,7 +204,8 @@ Only `topic` is required.
   "imageStyle": "modern editorial photography",
   "includeFaq": true,
   "includeToc": true,
-  "textModel": "MiniMax-M2.5",
+  "textProvider": "gemini",       // minimax | gemini — omit for the configured default
+  "textModel": "gemini-flash-latest",
   "useKnowledgeBase": true,      // write in the voice of your crawled posts
   "knowledgeSourceIds": []       // empty = every ready source
 }

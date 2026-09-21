@@ -1,7 +1,7 @@
 import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { URL } from 'url';
 import { PrismaService } from '../prisma/prisma.service';
-import { MinimaxService } from '../minimax/minimax.service';
+import { TextProviderRegistry } from '../providers/text-provider.registry';
 import { httpRequestRaw } from '../common/http.util';
 import { discoverArticleLinks, extractPage } from './html-extract.util';
 import {
@@ -19,7 +19,7 @@ export class KnowledgeService {
 
   constructor(
     private readonly prisma: PrismaService,
-    private readonly minimax: MinimaxService,
+    private readonly textProviders: TextProviderRegistry,
   ) {}
 
   // ----------------------------------------------------------------- ingest
@@ -217,10 +217,12 @@ export class KnowledgeService {
       excerpt: (s.content ?? '').slice(0, 1200),
     }));
 
-    const result = await this.minimax.chatJson<KnowledgeProfileResult>(
-      profilePrompt(corpus),
-      { temperature: 0.5, maxTokens: 6000 },
-    );
+    const result = await this.textProviders
+      .defaultProvider()
+      .chatJson<KnowledgeProfileResult>(profilePrompt(corpus), {
+        temperature: 0.5,
+        maxTokens: 6000,
+      });
 
     const data = {
       niche: result.niche ?? '',
