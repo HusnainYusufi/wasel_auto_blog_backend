@@ -48,13 +48,34 @@ export class GenerateBlogDto {
   @IsOptional()
   @IsArray()
   @IsString({ each: true })
-  @Transform(({ value }) =>
-    (Array.isArray(value) ? value : String(value ?? '').split(','))
-      .map((k: string) => k.trim())
-      .filter(Boolean)
-      .slice(0, 15),
-  )
+  @Transform(({ value }) => {
+    const raw = Array.isArray(value)
+      ? value.map((v) => String(v))
+      : String(value ?? '').split(/[\n,;]/);
+
+    // Preserve non-Latin keywords verbatim; only normalise whitespace.
+    const seen = new Set<string>();
+    const out: string[] = [];
+
+    for (const entry of raw) {
+      const keyword = entry.replace(/\s+/g, ' ').trim();
+      if (!keyword) continue;
+      const key = keyword.toLocaleLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(keyword);
+      if (out.length >= 50) break;
+    }
+
+    return out;
+  })
   keywords: string[] = [];
+
+  /** Saved keyword sets to merge into `keywords`. */
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  keywordSetIds: string[] = [];
 
   @IsOptional()
   @IsString()

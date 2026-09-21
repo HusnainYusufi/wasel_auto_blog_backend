@@ -11,6 +11,7 @@ import { MinimaxService } from '../minimax/minimax.service';
 import { TextProviderRegistry } from '../providers/text-provider.registry';
 import { StorageService } from '../storage/storage.service';
 import { KnowledgeService } from '../knowledge/knowledge.service';
+import { KeywordSetsService } from '../keyword-sets/keyword-sets.service';
 import { GenerateBlogDto } from './dto/generate-blog.dto';
 import {
   Blueprint,
@@ -49,9 +50,30 @@ export class BlogService {
     private readonly textProviders: TextProviderRegistry,
     private readonly storage: StorageService,
     private readonly knowledge: KnowledgeService,
+    private readonly keywordSets: KeywordSetsService,
   ) {}
 
   // ------------------------------------------------------------------ review
+
+  /**
+   * Slugs are derived from the title, and transliteration can legitimately map
+   * two different titles onto the same ASCII form (e.g. مراتب السرير and
+   * مراتب سرير). Suffix a counter so a slug is never silently reused.
+   */
+  private async uniqueSlug(base: string, blogId: string): Promise<string> {
+    const root = slugify(base);
+
+    for (let attempt = 0; attempt < 50; attempt++) {
+      const candidate = attempt === 0 ? root : `${root}-${attempt + 1}`;
+      const clash = await this.prisma.blog.findFirst({
+        where: { slug: candidate, id: { not: blogId } },
+        select: { id: true },
+      });
+      if (!clash) return candidate;
+    }
+
+    return `${root}-${blogId.slice(-6)}`;
+  }
 
   private async audit(
     blogId: string,
@@ -153,10 +175,15 @@ export class BlogService {
       model: dto.textModel,
     });
 
+    // Keywords typed directly take precedence over the ones a set contributes.
+    const setIds = dto.keywordSetIds ?? [];
+    const fromSets = await this.keywordSets.resolveKeywords(setIds);
+    const mergedKeywords = mergeKeywords(dto.keywords ?? [], fromSets);
+
     const blog = await this.prisma.blog.create({
       data: {
         topic: dto.topic,
-        keywords: JSON.stringify(dto.keywords ?? []),
+        keywords: JSON.stringify(mergedKeywords),
         language: dto.language,
         tone: dto.tone,
         audience: dto.audience,
@@ -184,6 +211,7 @@ export class BlogService {
 
     this.channels.set(blog.id, new Subject<ProgressEvent>());
     await this.audit(blog.id, 'created', userId, dto.topic);
+    await this.keywordSets.recordUse(setIds);
 
     // Fire-and-forget: the client follows progress over SSE.
     void this.run(blog.id).catch((err) =>
@@ -251,7 +279,7 @@ export class BlogService {
         where: { id: blogId },
         data: {
           title: blueprint.title,
-          slug: blueprint.slug,
+          slug: await this.uniqueSlug(blueprint.slug || blueprint.title, blogId),
           metaTitle: blueprint.metaTitle,
           metaDescription: blueprint.metaDescription,
           excerpt: blueprint.excerpt,
@@ -401,7 +429,7 @@ export class BlogService {
       await this.emit(blogId, 'assemble', 'running', 'Building exports and structured data…', 96);
 
       if (blog.includeToc) {
-        markdown = insertTableOfContents(markdown);
+        markdown = insertTableOfContents(markdown, blog.language);
       }
 
       const words = countWords(markdown);
@@ -820,12 +848,33 @@ function headingAnchor(heading: string): string {
   return slugify(heading);
 }
 
-function insertTableOfContents(markdown: string): string {
+/**
+ * The TOC is assembled in code rather than by the model, so its heading has to
+ * be localised here or an Arabic article ends up with an English section title.
+ */
+const TOC_HEADINGS: Record<string, string> = {
+  arabic: 'جدول المحتويات',
+  english: 'Table of Contents',
+  french: 'Table des matières',
+  spanish: 'Tabla de contenidos',
+  german: 'Inhaltsverzeichnis',
+  portuguese: 'Índice',
+  turkish: 'İçindekiler',
+  urdu: 'فہرست',
+  hindi: 'विषय-सूची',
+  indonesian: 'Daftar Isi',
+};
+
+function tocHeading(language: string): string {
+  return TOC_HEADINGS[(language ?? '').trim().toLowerCase()] ?? 'Table of Contents';
+}
+
+function insertTableOfContents(markdown: string, language = 'English'): string {
   const headings = [...markdown.matchAll(/^##\s+(.+)$/gm)].map((m) => m[1].trim());
   if (headings.length < 3) return markdown;
 
   const toc = [
-    '## Table of Contents',
+    `## ${tocHeading(language)}`,
     '',
     ...headings.map((h) => `- [${h}](#${headingAnchor(h)})`),
     '',
@@ -1027,4 +1076,24 @@ function applyInternalLinks(
   }
 
   return { markdown: lines.join('\n'), applied };
+}
+
+/** Direct keywords first, then set keywords, de-duplicated case-insensitively. */
+function mergeKeywords(direct: string[], fromSets: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+
+  for (const keyword of [...direct, ...fromSets]) {
+    const trimmed = (keyword ?? '').replace(/\s+/g, ' ').trim();
+    if (!trimmed) continue;
+
+    const key = trimmed.toLocaleLowerCase();
+    if (seen.has(key)) continue;
+
+    seen.add(key);
+    out.push(trimmed);
+    if (out.length >= 50) break;
+  }
+
+  return out;
 }

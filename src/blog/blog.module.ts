@@ -5,9 +5,10 @@ import { MinimaxModule } from '../minimax/minimax.module';
 import { ProvidersModule } from '../providers/providers.module';
 import { StorageModule } from '../storage/storage.module';
 import { KnowledgeModule } from '../knowledge/knowledge.module';
+import { KeywordSetsModule } from '../keyword-sets/keyword-sets.module';
 
 @Module({
-  imports: [MinimaxModule, ProvidersModule, StorageModule, KnowledgeModule],
+  imports: [MinimaxModule, ProvidersModule, StorageModule, KnowledgeModule, KeywordSetsModule],
   controllers: [BlogController],
   providers: [BlogService],
 })

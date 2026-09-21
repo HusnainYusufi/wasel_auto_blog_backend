@@ -1,5 +1,13 @@
+import { hasArabic, transliterateArabic } from './transliterate.util';
+
+/**
+ * ASCII slug. Arabic is transliterated rather than stripped — stripping it left
+ * every Arabic title as "untitled", which also made slugs collide.
+ */
 export function slugify(input: string): string {
-  return (input || 'untitled')
+  const source = hasArabic(input) ? transliterateArabic(input) : input;
+
+  return (source || 'untitled')
     .toLowerCase()
     .normalize('NFKD')
     .replace(/[\u0300-\u036f]/g, '')

@@ -17,6 +17,46 @@ Each generation runs five stages and streams progress over SSE:
 
 A failed image never fails the article — its placeholder is simply dropped.
 
+## Keyword sets
+
+Reusable, named groups of target keywords. Pick one or more in the studio and their
+keywords are merged into the generation — typed keywords come first, then the sets', all
+de-duplicated case-insensitively and capped at 50.
+
+Sets are ordered pinned → most-used → newest, and `useCount` is bumped on each generation
+so the picker surfaces what you actually reach for. Keywords are stored verbatim, so
+Arabic and other non-Latin terms survive round-tripping unchanged.
+
+`prisma/seed.ts` ships one starter set (Arabic mattress keywords); existing sets are never
+overwritten.
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/api/keyword-sets` | All sets, pinned first. |
+| `POST` | `/api/keyword-sets` | Create. `keywords` accepts an array or a newline/comma blob. |
+| `PATCH` | `/api/keyword-sets/:id` | Partial update, including `pinned`. |
+| `DELETE` | `/api/keyword-sets/:id` | Delete (`admin`). |
+
+Pass `keywordSetIds` on a generation request to apply them.
+
+## Non-Latin languages
+
+Arabic (and any non-Latin script) is supported end to end, with two things handled
+explicitly:
+
+- **Slugs** are transliterated, not stripped. `slugify` previously removed every non-Latin
+  character, so every Arabic title produced the slug `untitled`. Arabic now maps to ASCII
+  (`افضل مراتب السرير` → `afdl-mratb-sryr`) via
+  [`transliterate.util.ts`](src/common/transliterate.util.ts), with the definite article
+  dropped. Because transliteration can map two distinct titles onto one slug
+  (`مراتب السرير` and `مراتب سرير` both give `mratb-sryr`), slugs are made unique with a
+  counter suffix at save time.
+- **The table of contents** is assembled in code after generation, so its heading is
+  localised per language rather than left as English in an Arabic article.
+
+Word counting and keyword density already worked on Arabic — density is measured by
+substring occurrence, which is script-agnostic.
+
 ## Text providers
 
 Text generation runs through a provider abstraction, so an article can be written by

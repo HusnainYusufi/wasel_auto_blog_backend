@@ -201,3 +201,24 @@ model BlogAuditLog {
   @@index([blogId])
   @@index([createdAt])
 }
+
+/// A reusable, named group of target keywords, applied to a generation in one click.
+model KeywordSet {
+  id       String  @id @default(cuid())
+  name     String  @unique
+  /// Optional note on when to reach for this set.
+  note     String?
+  keywords String  @default("[]") // JSON string[]
+  language String  @default("English")
+  /// Pinned sets surface first in the picker.
+  pinned   Boolean @default(false)
+  /// Bumped on each use so the picker can order by what actually gets used.
+  useCount Int     @default(0)
+
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([pinned])
+  @@index([useCount])
+}

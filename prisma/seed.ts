@@ -4,6 +4,8 @@
  *
  *   npm run seed
  *
+ * Also seeds a starter keyword set, so the studio has something usable on first run.
+ *
  * Credentials come from SUPERADMIN_EMAIL / SUPERADMIN_PASSWORD in .env.
  * Re-running is safe: an existing account is left alone unless
  * SUPERADMIN_RESET_PASSWORD=true, in which case its password is reset.
@@ -61,7 +63,49 @@ async function main() {
   console.log(`Superadmin created: ${email}`);
 }
 
+/** Starter keyword sets. Existing sets are never overwritten. */
+const STARTER_KEYWORD_SETS = [
+  {
+    name: 'مراتب السرير',
+    note: 'Arabic mattress keywords for the Saudi market',
+    language: 'Arabic',
+    pinned: true,
+    keywords: [
+      'افضل مراتب',
+      'عروض مراتب السرير',
+      'مراتب السرير',
+      'مراتب سرير',
+    ],
+  },
+];
+
+async function seedKeywordSets() {
+  for (const set of STARTER_KEYWORD_SETS) {
+    const existing = await prisma.keywordSet.findUnique({
+      where: { name: set.name },
+    });
+    if (existing) {
+      console.log(`Keyword set "${set.name}" already exists — skipped.`);
+      continue;
+    }
+
+    await prisma.keywordSet.create({
+      data: {
+        name: set.name,
+        note: set.note,
+        language: set.language,
+        pinned: set.pinned,
+        keywords: JSON.stringify(set.keywords),
+      },
+    });
+    console.log(
+      `Keyword set created: ${set.name} (${set.keywords.length} keywords)`,
+    );
+  }
+}
+
 main()
+  .then(seedKeywordSets)
   .catch((err) => {
     console.error(err.message);
     process.exit(1);

@@ -10,6 +10,7 @@ import { GeminiModule } from './gemini/gemini.module';
 import { ProvidersModule } from './providers/providers.module';
 import { BlogModule } from './blog/blog.module';
 import { KnowledgeModule } from './knowledge/knowledge.module';
+import { KeywordSetsModule } from './keyword-sets/keyword-sets.module';
 import { AuthModule } from './auth/auth.module';
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 import { RolesGuard } from './auth/guards/roles.guard';
@@ -31,6 +32,7 @@ import { HealthController } from './common/health.controller';
     GeminiModule,
     ProvidersModule,
     KnowledgeModule,
+    KeywordSetsModule,
     BlogModule,
   ],
   controllers: [HealthController],
