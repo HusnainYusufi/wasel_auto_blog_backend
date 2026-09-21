@@ -83,9 +83,18 @@ export class BlogService {
     userId?: string | null,
     note = '',
   ) {
-    await this.prisma.blogAuditLog.create({
-      data: { blogId, action, note, userId: userId ?? null },
-    });
+    try {
+      await this.prisma.blogAuditLog.create({
+        data: { blogId, action, note, userId: userId ?? null },
+      });
+    } catch (err) {
+      // An audit row is never worth failing a generation over.
+      if (!isMissingRecord(err)) {
+        this.logger.warn(
+          `Could not write audit entry "${action}" for ${blogId}: ${(err as Error).message}`,
+        );
+      }
+    }
   }
 
   /** Keep the article: it moves out of the review queue as approved. */
@@ -480,6 +489,13 @@ export class BlogService {
       await this.emit(blogId, 'assemble', 'done', 'Your article is ready', 100);
       await this.emit(blogId, 'done', 'done', 'completed', 100);
     } catch (err) {
+      if (err instanceof BlogRemovedError || isMissingRecord(err)) {
+        this.logger.log(
+          `Generation for ${blogId} stopped: the article was deleted`,
+        );
+        return;
+      }
+
       const message = (err as Error).message ?? 'Generation failed';
       this.logger.error(`Generation failed for ${blogId}: ${message}`);
       await this.prisma.blog.update({
@@ -548,13 +564,22 @@ export class BlogService {
       createdAt: new Date().toISOString(),
     };
 
-    await this.prisma.generationEvent.create({
-      data: { blogId, step, status, message, progress },
-    });
-    await this.prisma.blog.update({
-      where: { id: blogId },
-      data: { progress, currentStep: step },
-    });
+    // The article can be deleted while its generation is still running, so a
+    // missing row is an expected outcome here, not an error worth surfacing.
+    try {
+      await this.prisma.generationEvent.create({
+        data: { blogId, step, status, message, progress },
+      });
+      await this.prisma.blog.update({
+        where: { id: blogId },
+        data: { progress, currentStep: step },
+      });
+    } catch (err) {
+      if (isMissingRecord(err)) {
+        throw new BlogRemovedError(blogId);
+      }
+      throw err;
+    }
 
     this.channels.get(blogId)?.next(event);
   }
@@ -1110,4 +1135,21 @@ function mergeKeywords(direct: string[], fromSets: string[]): string[] {
   }
 
   return out;
+}
+
+/** Raised when the article being generated is deleted mid-pipeline. */
+class BlogRemovedError extends Error {
+  constructor(blogId: string) {
+    super(`Blog ${blogId} was removed during generation`);
+    this.name = 'BlogRemovedError';
+  }
+}
+
+/** Prisma P2025: an update/delete targeted a row that no longer exists. */
+function isMissingRecord(err: unknown): boolean {
+  return (
+    typeof err === 'object' &&
+    err !== null &&
+    (err as { code?: string }).code === 'P2025'
+  );
 }
