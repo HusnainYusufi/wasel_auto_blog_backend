@@ -23,6 +23,7 @@ import {
   articlePrompt,
   blueprintPrompt,
   interlinkPrompt,
+  translatePrompt,
   imagePrompt,
   seoPackPrompt,
 } from './blog.prompts';
@@ -75,6 +76,21 @@ export class BlogService {
     }
 
     return `${root}-${blogId.slice(-6)}`;
+  }
+
+  /** Product pages to link from the body, resolved from knowledge sources. */
+  private async loadProducts(ids: string[]) {
+    if (!ids.length) return [];
+
+    const sources = await this.prisma.knowledgeSource.findMany({
+      where: { id: { in: ids }, status: 'ready' },
+    });
+
+    return sources.map((s) => ({
+      // Storefront titles carry a "| brand" suffix that reads badly as anchor text.
+      name: (s.title ?? s.url).split('|')[0].trim(),
+      url: s.url,
+    }));
   }
 
   private async audit(
@@ -202,6 +218,9 @@ export class BlogService {
       data: {
         topic: dto.topic,
         keywords: JSON.stringify(mergedKeywords),
+        secondaryKeywords: JSON.stringify(dto.secondaryKeywords ?? []),
+        altLanguage: dto.altLanguage ?? null,
+        productSourceIds: JSON.stringify(dto.productSourceIds ?? []),
         language: dto.language,
         tone: dto.tone,
         audience: dto.audience,
@@ -259,6 +278,10 @@ export class BlogService {
       includeFaq: blog.includeFaq,
       imageCount: blog.imageCount,
       imageStyle: blog.imageStyle,
+      secondaryKeywords: safeParse<string[]>(blog.secondaryKeywords, []),
+      products: await this.loadProducts(
+        safeParse<string[]>(blog.productSourceIds, []),
+      ),
     };
 
     if (blog.useKnowledgeBase) {
@@ -485,6 +508,42 @@ export class BlogService {
         },
       });
 
+      if (blog.altLanguage) {
+        await this.emit(
+          blogId,
+          'assemble',
+          'running',
+          `Writing the ${blog.altLanguage} version…`,
+          98,
+        );
+        try {
+          const alt = cleanMarkdown(
+            await text.chat(translatePrompt(markdown, blog.altLanguage), {
+              model,
+              temperature: 0.4,
+              // Reasoning models spend this budget before emitting any prose, so
+              // a translation needs far more headroom than its output length.
+              maxTokens: 32000,
+            }),
+          );
+          if (!alt.trim()) {
+            throw new Error('translation came back empty');
+          }
+          await this.prisma.blog.update({
+            where: { id: blogId },
+            data: {
+              altContentMarkdown: alt,
+              altTitle: alt.match(/^#\s+(.+)$/m)?.[1]?.trim() ?? null,
+            },
+          });
+        } catch (err) {
+          // A failed translation must not discard a finished article.
+          this.logger.warn(
+            `Alt-language pass failed for ${blogId}: ${(err as Error).message}`,
+          );
+        }
+      }
+
       await this.audit(blogId, 'completed', blog.createdById, `${words} words`);
       await this.emit(blogId, 'assemble', 'done', 'Your article is ready', 100);
       await this.emit(blogId, 'done', 'done', 'completed', 100);
@@ -670,6 +729,9 @@ export class BlogService {
     return {
       ...this.toSummary(blog),
       contentMarkdown: blog.contentMarkdown,
+      altLanguage: blog.altLanguage,
+      altTitle: blog.altTitle,
+      altContentMarkdown: blog.altContentMarkdown,
       contentHtml: blog.contentHtml,
       outline: safeParse(blog.outline, null),
       seo: safeParse(blog.seo, null),

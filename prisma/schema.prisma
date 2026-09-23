@@ -54,6 +54,14 @@ model Blog {
   knowledgeSourceIds String  @default("[]") // JSON string[] of KnowledgeSource ids used
 
   // Editorial review
+  /// Secondary/supporting keywords, kept apart from the primary set.
+  secondaryKeywords String @default("[]")
+  /// Second-language body, when a bilingual pair is requested.
+  altLanguage        String?
+  altContentMarkdown String?
+  altTitle           String?
+  productSourceIds   String  @default("[]")
+
   reviewStatus String    @default("pending") // pending | approved | rejected
   reviewNote   String?
   reviewedAt   DateTime?
@@ -109,6 +117,8 @@ model KnowledgeSource {
   id     String @id @default(cuid())
   url    String @unique
   status String @default("pending") // pending | ready | failed
+  /// article = style/context reference, product = link to embed in the body
+  kind   String @default("article")
 
   title       String?
   siteName    String?

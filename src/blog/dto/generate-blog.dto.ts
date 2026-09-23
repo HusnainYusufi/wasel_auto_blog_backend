@@ -72,6 +72,24 @@ export class GenerateBlogDto {
   })
   keywords: string[] = [];
 
+  /** Supporting keywords, weighted below `keywords`. */
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  secondaryKeywords: string[] = [];
+
+  /** Also write the article in this language (e.g. "Arabic"). */
+  @IsOptional()
+  @IsString()
+  @MaxLength(40)
+  altLanguage?: string;
+
+  /** Knowledge sources marked as products, to link from the body. */
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  productSourceIds: string[] = [];
+
   /** Saved keyword sets to merge into `keywords`. */
   @IsOptional()
   @IsArray()

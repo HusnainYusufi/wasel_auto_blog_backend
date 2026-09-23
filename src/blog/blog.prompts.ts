@@ -24,6 +24,10 @@ export interface BlueprintRequest {
   includeFaq: boolean;
   imageCount: number;
   imageStyle: string;
+  /** Supporting keywords, weighted below `keywords`. */
+  secondaryKeywords?: string[];
+  /** Product pages to link from the body, as {name, url}. */
+  products?: Array<{ name: string; url: string }>;
   /** Briefing derived from previously published articles, when enabled. */
   knowledge?: KnowledgeContext | null;
 }
@@ -70,6 +74,18 @@ export interface SeoPack {
   improvementTips: string[];
 }
 
+/**
+ * Client house rules. Em dashes and emoji are the two most common AI tells, so
+ * they are banned outright; ordinary hyphens stay, since Arabic compounds and
+ * terms like "made-to-measure" or "120x200" need them.
+ */
+export const HOUSE_RULES = `
+STYLE RULES (non-negotiable)
+- Never use emoji.
+- Never use em dashes or en dashes. Use a comma, a full stop, or a colon instead. Ordinary hyphens inside words and measurements are fine.
+- Write as an experienced human editor would. No AI throat-clearing, no "in today's world", no "delve", no "it is important to note", no "in conclusion".
+- Do not announce the structure ("in this article we will"). Just deliver it.`;
+
 const EDITOR_PERSONA =
   'You are a senior content strategist and SEO editor who has shipped thousands of top-ranking articles. You write with genuine expertise, concrete detail, and zero filler. You never pad with phrases like "in today\'s fast-paced world", "delve into", "it is important to note", or "in conclusion".';
 
@@ -106,13 +122,17 @@ export function blueprintPrompt(req: BlueprintRequest): ChatMessage[] {
   const sectionImages = Math.max(0, req.imageCount - 1);
 
   return [
-    { role: 'system', content: EDITOR_PERSONA },
+    { role: 'system', content: EDITOR_PERSONA + HOUSE_RULES },
     {
       role: 'user',
       content: `Plan a search-optimized blog article and return it as JSON.
 ${knowledgeBlock(req.knowledge)}
 TOPIC: ${req.topic}
-TARGET KEYWORDS: ${req.keywords.length ? req.keywords.join(', ') : '(derive the best keywords yourself from the topic)'}
+PRIMARY KEYWORDS (the page must rank for these): ${req.keywords.length ? req.keywords.join(', ') : '(derive the best keywords yourself from the topic)'}${
+  req.secondaryKeywords?.length
+    ? `\nSECONDARY KEYWORDS (work in naturally, lower priority): ${req.secondaryKeywords.join(', ')}`
+    : ''
+}
 LANGUAGE: ${req.language} (write every field in this language, except "slug" which stays lowercase ASCII)
 TONE: ${req.tone}
 AUDIENCE: ${req.audience}
@@ -180,7 +200,7 @@ export function articlePrompt(
     : '- No inline image tokens are needed.';
 
   return [
-    { role: 'system', content: EDITOR_PERSONA },
+    { role: 'system', content: EDITOR_PERSONA + HOUSE_RULES },
     {
       role: 'user',
       content: `Write the complete article in Markdown, in ${req.language}.
@@ -207,8 +227,22 @@ IMAGE PLACEHOLDERS
 ${tokenInstructions}
 - Write the token exactly as given, alone on its line, with a blank line above and below. Do not write Markdown image syntax yourself.
 
-SEO RULES
-- The primary keyword appears in the H1, in the first 100 words, in at least two H2s, and 4-8 times in the body — always naturally, never stuffed.
+${
+  req.products?.length
+    ? `PRODUCT LINKS (required)
+- You MUST include exactly ${req.products.length} product link${req.products.length > 1 ? 's' : ''}: one for each product listed below. An article missing any of them is incomplete.
+- Place each in a sentence where recommending it is genuinely useful. Use the product name as the anchor text.
+- Spread them across different sections. Never stack two in one paragraph, and never put one in the opening hook.
+${req.products.map((p) => `  - ${p.name} -> ${p.url}`).join('\n')}
+
+`
+    : ''
+}SEO RULES
+- The primary keyword appears in the H1, in the first 100 words, in at least two H2s, and 4-8 times in the body, always naturally, never stuffed.${
+  req.secondaryKeywords?.length
+    ? `\n- Each secondary keyword appears at least once: ${req.secondaryKeywords.join(', ')}`
+    : ''
+}
 - Vary sentence length. Keep paragraphs to 2-4 sentences.
 - Be concrete: name techniques, trade-offs, and examples. Never invent statistics, studies, dates, prices, or quotes from real people.
 - Do not include a meta description, front-matter, or any commentary about the writing task.
@@ -314,6 +348,40 @@ Rules:
 
 Return exactly:
 { "links": [{ "anchor": string, "url": string, "reason": string }] }`,
+    },
+  ];
+}
+
+/**
+ * Second-language version of a finished article. Translating the approved draft
+ * keeps both languages structurally identical, which generating twice does not.
+ */
+export function translatePrompt(
+  markdown: string,
+  targetLanguage: string,
+  altTitle?: string,
+): ChatMessage[] {
+  return [
+    { role: 'system', content: EDITOR_PERSONA + HOUSE_RULES },
+    {
+      role: 'user',
+      content: `Rewrite this article in ${targetLanguage}.
+
+${altTitle ? `Use exactly this H1: ${altTitle}\n` : ''}
+Rules:
+- Produce natural, idiomatic ${targetLanguage} that reads as though written in it, not translated.
+- Keep the heading, list and table structure identical.
+- Keep every Markdown link exactly as written: same URL, same position. Translate only the anchor text.
+- Keep every image line exactly as written, including the URL. Translate only the alt text.
+- Keep brand and product names in their established ${targetLanguage} form where one exists, otherwise leave them as they are.
+- Do not add, remove or reorder sections.
+
+ARTICLE:
+"""
+${markdown}
+"""
+
+Output raw Markdown only.`,
     },
   ];
 }
